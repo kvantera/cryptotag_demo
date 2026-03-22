@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>CryptoTag — IFF Demo</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+body{
+  background:#060e18;font-family:'Share Tech Mono',monospace;
+  width:100vw;height:100vh;overflow:hidden;
+  margin:0;padding:0;
+}
+#outer{
+  position:fixed;top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  display:flex;flex-direction:column;align-items:center;
+  gap:0;
+}
+body::before{
+  content:'';position:fixed;inset:0;
+  background-image:linear-gradient(rgba(0,180,100,.05) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,180,100,.05) 1px,transparent 1px);
+  background-size:44px 44px;pointer-events:none;
+}
+#title{
+  font-family:'Orbitron',monospace;font-weight:900;font-size:20px;
+  letter-spacing:6px;color:#00ff88;text-shadow:0 0 24px #00ff88;
+  margin:0 0 4px 0;text-align:center;white-space:nowrap;
+}
+#scene-label{
+  font-family:'Orbitron',monospace;font-size:11px;letter-spacing:3px;
+  color:#ffcc00;text-align:center;margin:0 0 6px 0;min-height:18px;white-space:nowrap;
+}
+#wrap{position:relative;width:960px;height:540px;}
+canvas{display:block;background:#07111c;
+  border:1px solid rgba(0,255,136,.15);border-radius:4px;
+  box-shadow:0 0 50px rgba(0,255,136,.07);}
+#log{
+  position:absolute;right:8px;top:8px;width:210px;
+  background:rgba(0,0,0,.8);border:1px solid rgba(0,255,136,.2);
+  border-radius:4px;padding:9px;font-size:9.5px;line-height:1.75;
+  max-height:230px;overflow:hidden;pointer-events:none;
+}
+#log-title{color:#ffcc00;letter-spacing:2px;margin-bottom:5px;font-size:9px;}
+.ll{opacity:0;animation:fi .3s forwards;}
+.lg{color:#00ff88;}.lr{color:#ff3333;}.ly{color:#ffcc00;}.lb{color:#00cfff;}
+@keyframes fi{to{opacity:1;}}
+#status{
+  margin:6px 0 0 0;font-family:'Orbitron',monospace;font-size:12px;
+  letter-spacing:3px;text-align:center;min-height:20px;transition:color .3s;
+  white-space:nowrap;
+}
+#btn{
+  margin:8px 0 0 0;background:transparent;border:1px solid #00ff88;
+  color:#00ff88;font-family:'Orbitron',monospace;font-size:10px;
+  letter-spacing:3px;padding:6px 20px;cursor:pointer;border-radius:2px;
+  transition:all .2s;display:none;
+}
+#btn:hover{background:#00ff88;color:#07111c;}
+</style>
+</head>
+<body>
+<div id="outer">
+<div id="title">CRYPTOTAG — IFF SYSTEM</div>
+<div id="scene-label">ІНІЦІАЛІЗАЦІЯ...</div>
+<div id="wrap">
+  <canvas id="c" width="960" height="540"></canvas>
+  <div id="log"><div id="log-title">▌ SYSTEM LOG</div><div id="le"></div></div>
+</div>
+<div id="status"></div>
+<button id="btn" onclick="init()">▶ ПЕРЕЗАПУСТИТИ</button>
+</div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const W=960,H=540;
+const G='#00ff88',R='#ff3333',Y='#ffcc00',B='#00cfff';
+
+// ─── Layout ────────────────────────────────────────────────────
+// Front line lower — our side is bigger (top ~70%), enemy bottom ~30%
+const FRONT_Y = 370;
+
+// Our side (top): controller top-left, operator below-left, REB center, zenith right
+const CTRL_X=90,  CTRL_Y=100;   // Контролер Т (top) — holds CryptoTag device
+const SOL_X=90,   SOL_Y=220;    // Оператор (below controller) — flies the drone
+const REB_X=530,  REB_Y=180;
+const ZEN_X=730,  ZEN_Y=170;
+
+// Friendly plane: home top-left, flies right & down into enemy for recon, returns high
+const PLANE_HOME_X=200, PLANE_HOME_Y=210;
+const PLANE_CROSS_X=700, PLANE_CROSS_Y=440;  // recon in enemy territory
+// Return altitude: HIGH on our side, well above enemy drone
+const PLANE_RETURN_Y=185;
+
+// Enemy drone: spawns in enemy territory, then CROSSES front to our side chasing plane
+// Stays at lower altitude on our side so paths don't cross visually
+const ENE_START_X=680, ENE_START_Y=470;
+// After crossing front, enemy flies on OUR side but clearly below PLANE_RETURN_Y
+const ENE_OUR_SIDE_Y=300;
+
+// ─── Helpers ───────────────────────────────────────────────────
+function log(t,c='lg'){
+  const el=document.getElementById('le');
+  const d=document.createElement('div');d.className='ll '+c;d.textContent=t;
+  el.appendChild(d);if(el.children.length>13)el.removeChild(el.firstChild);
+}
+function setLabel(t){document.getElementById('scene-label').textContent=t;}
+function setStatus(t,c=G){const s=document.getElementById('status');s.textContent=t;s.style.color=c;}
+function gw(c,b=12){ctx.shadowColor=c;ctx.shadowBlur=b;}
+function ng(){ctx.shadowColor='transparent';ctx.shadowBlur=0;}
+
+// ─── Scene drawing ─────────────────────────────────────────────
+function drawFrontLine(){
+  ctx.save();
+  // territory fills
+  ctx.fillStyle='rgba(0,255,136,.038)';ctx.fillRect(0,0,W,FRONT_Y);
+  ctx.fillStyle='rgba(255,51,51,.038)';ctx.fillRect(0,FRONT_Y,W,H-FRONT_Y);
+  // front line
+  ctx.strokeStyle='#ff8800';ctx.lineWidth=2.5;gw('#ff8800',12);
+  ctx.setLineDash([18,9]);
+  ctx.beginPath();ctx.moveTo(0,FRONT_Y);ctx.lineTo(W,FRONT_Y);ctx.stroke();
+  ctx.setLineDash([]);ng();
+  // labels
+  ctx.font='bold 10px "Share Tech Mono"';
+  ctx.fillStyle='rgba(0,255,136,.5)';ctx.textAlign='left';
+  ctx.fillText('▲  НАША СТОРОНА',12,FRONT_Y-10);
+  ctx.fillStyle='rgba(255,51,51,.5)';
+  ctx.fillText('▼  ВОРОЖА СТОРОНА',12,FRONT_Y+20);
+  ctx.fillStyle='rgba(255,136,0,.65)';ctx.font='9px "Share Tech Mono"';
+  ctx.textAlign='center';ctx.fillText('— — —  ЛІНІЯ ФРОНТУ  — — —',W/2,FRONT_Y-5);
+  ctx.restore();
+}
+
+function drawSoldier(x,y,hasTag,lbl='ОПЕРАТОР'){
+  ctx.save();
+  gw(Y,8);ctx.fillStyle=Y;ctx.beginPath();ctx.arc(x,y-28,9,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle=Y;ctx.lineWidth=2.5;ctx.stroke();
+  ctx.strokeStyle=G;ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y-34,10,Math.PI,0);ctx.stroke();
+  ctx.strokeStyle=Y;ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(x,y-19);ctx.lineTo(x,y+4);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(x-11,y-12);ctx.lineTo(x+11,y-12);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(x,y+4);ctx.lineTo(x-7,y+22);ctx.moveTo(x,y+4);ctx.lineTo(x+7,y+22);ctx.stroke();
+  ng();
+  ctx.fillStyle=Y;ctx.font='9px "Share Tech Mono"';ctx.textAlign='center';ctx.fillText(lbl,x,y+34);
+  if(hasTag){
+    gw(G,12);ctx.fillStyle=G;ctx.fillRect(x+12,y-19,18,11);ng();
+    ctx.strokeStyle=G;ctx.lineWidth=1;ctx.strokeRect(x+12,y-19,18,11);
+    ctx.fillStyle='#000';ctx.font='6px "Share Tech Mono"';ctx.textAlign='left';ctx.fillText('CT',x+15,y-11);
+  }
+  ctx.restore();
+}
+
+// Fixed-wing plane (green, our side)
+function drawPlane(x,y,dir,hasTag,alpha=1){
+  ctx.save();ctx.globalAlpha=alpha;ctx.translate(x,y);ctx.scale(dir,1);
+  gw(G,hasTag?22:8);ctx.fillStyle=G;
+  ctx.beginPath();ctx.moveTo(28,0);ctx.lineTo(-20,7);ctx.lineTo(-15,0);ctx.lineTo(-20,-7);ctx.closePath();ctx.fill();
+  ctx.fillStyle='rgba(0,230,120,.85)';
+  // left wing up
+  ctx.beginPath();ctx.moveTo(5,-3);ctx.lineTo(-9,-28);ctx.lineTo(-17,-28);ctx.lineTo(-8,-3);ctx.closePath();ctx.fill();
+  // left wing down (symmetry)
+  ctx.beginPath();ctx.moveTo(5,3);ctx.lineTo(-9,28);ctx.lineTo(-17,28);ctx.lineTo(-8,3);ctx.closePath();ctx.fill();
+  // tail fin
+  ctx.fillStyle='rgba(0,255,136,.9)';
+  ctx.beginPath();ctx.moveTo(-15,-6);ctx.lineTo(-25,-19);ctx.lineTo(-20,-6);ctx.closePath();ctx.fill();
+  // cockpit
+  ctx.fillStyle='rgba(180,255,220,.3)';ctx.beginPath();ctx.ellipse(15,0,6,4,0,0,Math.PI*2);ctx.fill();
+  if(hasTag){
+    ctx.fillStyle='#000';ctx.fillRect(-5,-5,12,8);
+    ctx.strokeStyle=G;ctx.lineWidth=1;ctx.strokeRect(-5,-5,12,8);
+    ctx.fillStyle=G;ctx.font='5px "Share Tech Mono"';ctx.textAlign='center';ctx.fillText('CT',1,2);
+  }
+  ng();ctx.restore();
+  ctx.save();ctx.globalAlpha=alpha;ctx.fillStyle=G;
+  ctx.font='10px "Share Tech Mono"';ctx.textAlign='center';ctx.fillText('БПЛА (СВІЙ)',x,y-36);ctx.restore();
+}
+
+// Quad drone (red, enemy)
+function drawEnemyDrone(x,y,alpha=1){
+  ctx.save();ctx.globalAlpha=alpha;ctx.translate(x,y);
+  gw(R,12);ctx.fillStyle=R;ctx.beginPath();ctx.ellipse(0,0,15,9,0,0,Math.PI*2);ctx.fill();ng();
+  [[-20,-20],[20,-20],[-20,20],[20,20]].forEach(([ax,ay])=>{
+    ctx.strokeStyle=R;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(ax,ay);ctx.stroke();
+    ctx.strokeStyle='rgba(255,80,80,.55)';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.ellipse(ax,ay,8,2.5,.5,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.ellipse(ax,ay,8,2.5,-.5,0,Math.PI*2);ctx.stroke();
+  });
+  ctx.restore();
+  ctx.save();ctx.globalAlpha=alpha;ctx.fillStyle=R;
+  ctx.font='10px "Share Tech Mono"';ctx.textAlign='center';ctx.fillText('БПЛА (ЧУЖИЙ)',x,y+38);ctx.restore();
+}
+
+function drawREB(x,y){
+  ctx.save();
+  gw(B,10);ctx.fillStyle=B;ctx.fillRect(x-18,y-13,36,26);ng();
+  ctx.strokeStyle=B;ctx.lineWidth=1.5;ctx.strokeRect(x-18,y-13,36,26);
+  gw(B,6);ctx.strokeStyle=B;ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(x,y-13);ctx.lineTo(x,y-34);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(x,y-34);ctx.lineTo(x-10,y-24);ctx.moveTo(x,y-34);ctx.lineTo(x+10,y-24);ctx.stroke();
+  ng();
+  ctx.fillStyle='rgba(0,207,255,.18)';ctx.fillRect(x-11,y-7,22,14);
+  ctx.fillStyle=B;ctx.font='7px "Share Tech Mono"';ctx.textAlign='center';ctx.fillText('IFF',x,y+3);
+  ctx.fillStyle=B;ctx.font='10px "Share Tech Mono"';ctx.fillText('ЗАПИТУВАЧ',x,y+42);
+  ctx.restore();
+}
+
+function drawZenith(x,y,angle){
+  ctx.save();
+  gw(B,8);ctx.fillStyle=B;ctx.fillRect(x-18,y+4,36,16);ng();
+  ctx.strokeStyle='rgba(0,180,220,.4)';ctx.lineWidth=1;ctx.strokeRect(x-18,y+4,36,16);
+  ctx.strokeStyle=B;ctx.lineWidth=2;
+  [-11,11].forEach(ox=>{
+    ctx.beginPath();ctx.arc(x+ox,y+20,6,0,Math.PI*2);ctx.stroke();
+    gw(B,4);ctx.fillStyle=B;ctx.beginPath();ctx.arc(x+ox,y+20,2.5,0,Math.PI*2);ctx.fill();ng();
+  });
+  ctx.translate(x,y+4);ctx.rotate(angle);
+  gw(B,10);ctx.strokeStyle=B;ctx.lineWidth=6;
+  ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(38,0);ctx.stroke();ng();
+  ctx.fillStyle='#88eeff';ctx.beginPath();ctx.arc(38,0,4,0,Math.PI*2);ctx.fill();
+  gw(B,6);ctx.fillStyle=B;ctx.beginPath();ctx.arc(0,0,9,0,Math.PI*2);ctx.fill();ng();
+  ctx.restore();
+  ctx.fillStyle=B;ctx.font='10px "Share Tech Mono"';ctx.textAlign='center';ctx.fillText('ЗЕНІТКА',x,y+42);
+}
+
+// Fire Command Signal — bold red dashed beam REB→ZEN
+function FireSig(x1,y1,x2,y2,cb){
+  this.x1=x1;this.y1=y1;this.x2=x2;this.y2=y2;this.cb=cb;
+  this.p=0;this.done=false;this.speed=.022;this.flash=0;
+}
+FireSig.prototype.update=function(){
+  if(this.done)return;
+  this.p=Math.min(1,this.p+this.speed);
+  this.flash=(this.flash+.3)%(Math.PI*2);
+  if(this.p>=1){this.done=true;if(this.cb)this.cb();}
+};
+FireSig.prototype.draw=function(){
+  const px=this.x1+(this.x2-this.x1)*this.p;
+  const py=this.y1+(this.y2-this.y1)*this.p;
+  ctx.save();
+  // Outer glow
+  gw(R,20);ctx.strokeStyle='rgba(255,51,51,.3)';ctx.lineWidth=8;
+  ctx.setLineDash([12,6]);
+  ctx.beginPath();ctx.moveTo(this.x1,this.y1);ctx.lineTo(px,py);ctx.stroke();
+  // Core line
+  ctx.strokeStyle=R;ctx.lineWidth=3;gw(R,14);
+  ctx.beginPath();ctx.moveTo(this.x1,this.y1);ctx.lineTo(px,py);ctx.stroke();
+  ctx.setLineDash([]);ng();
+  // Pulsing head
+  const pulse=.7+Math.sin(this.flash)*.3;
+  ctx.globalAlpha=pulse;gw(R,20);ctx.fillStyle=R;
+  ctx.beginPath();ctx.arc(px,py,6,0,Math.PI*2);ctx.fill();ng();
+  ctx.globalAlpha=1;
+  // Label
+  if(this.p>.25&&this.p<.85){
+    const mx=this.x1+(px-this.x1)*.55;
+    const my=this.y1+(py-this.y1)*.55-14;
+    gw(R,12);ctx.fillStyle=R;ctx.font='bold 11px "Orbitron"';
+    ctx.textAlign='center';ctx.fillText('🔴 ВОГОНЬ!',mx,my);ng();
+  }
+  ctx.restore();
+};
+
+// Signal beam
+function Sig(x1,y1,x2,y2,col,lbl,cb,speed=.018){
+  Object.assign(this,{x1,y1,x2,y2,col,lbl,cb,speed,p:0,done:false});
+}
+Sig.prototype.update=function(){
+  if(this.done)return;this.p=Math.min(1,this.p+this.speed);
+  if(this.p>=1){this.done=true;if(this.cb)this.cb();}
+};
+Sig.prototype.draw=function(){
+  const px=this.x1+(this.x2-this.x1)*this.p;
+  const py=this.y1+(this.y2-this.y1)*this.p;
+  ctx.save();gw(this.col,10);ctx.strokeStyle=this.col;ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.moveTo(this.x1,this.y1);ctx.lineTo(px,py);ctx.stroke();ng();
+  gw(this.col,16);ctx.fillStyle=this.col;ctx.beginPath();ctx.arc(px,py,4,0,Math.PI*2);ctx.fill();ng();
+  if(this.p>.25&&this.p<.8){
+    const mx=(this.x1*0.3+px*0.7),my=(this.y1*0.3+py*0.7)-12;
+    gw(this.col,8);ctx.fillStyle=this.col;ctx.font='bold 10px "Share Tech Mono"';
+    ctx.textAlign='center';ctx.fillText(this.lbl,mx,my);ng();
+  }
+  ctx.restore();
+};
+
+// Shell
+function Shell(x1,y1,x2,y2,cb){
+  Object.assign(this,{x1,y1,x2,y2,cb,p:0,done:false,trail:[]});
+}
+Shell.prototype.update=function(){
+  if(this.done)return;this.p=Math.min(1,this.p+.028);
+  const cx=this.x1+(this.x2-this.x1)*this.p;
+  const cy=this.y1+(this.y2-this.y1)*this.p;
+  this.trail.push({x:cx,y:cy,a:1});
+  this.trail.forEach(t=>t.a-=.07);this.trail=this.trail.filter(t=>t.a>0);
+  if(this.p>=1){this.done=true;if(this.cb)this.cb();}
+};
+Shell.prototype.draw=function(){
+  this.trail.forEach(t=>{
+    ctx.save();ctx.globalAlpha=t.a*.55;gw('#ff8800',6);ctx.fillStyle='#ff8800';
+    ctx.beginPath();ctx.arc(t.x,t.y,3,0,Math.PI*2);ctx.fill();ng();ctx.restore();
+  });
+  if(this.done)return;
+  const cx=this.x1+(this.x2-this.x1)*this.p;
+  const cy=this.y1+(this.y2-this.y1)*this.p;
+  ctx.save();gw(Y,18);ctx.fillStyle=Y;ctx.beginPath();ctx.arc(cx,cy,5,0,Math.PI*2);ctx.fill();ng();ctx.restore();
+};
+
+function Boom(x,y){
+  this.x=x;this.y=y;this.r=0;this.life=1;
+  this.pts=Array.from({length:26},()=>({
+    vx:(Math.random()-.5)*8,vy:(Math.random()-.5)*8,
+    x,y,life:1,col:[R,Y,'#ff8800','#ff6600'][~~(Math.random()*4)]
+  }));
+}
+Boom.prototype.update=function(){
+  this.life-=.02;this.r+=6;
+  this.pts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life-=.024;p.vy+=.15;});
+};
+Boom.prototype.draw=function(){
+  if(this.life<=0)return;
+  ctx.save();ctx.globalAlpha=this.life*.4;gw(R,24);ctx.strokeStyle=R;ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.stroke();
+  ctx.globalAlpha=this.life*.25;ctx.fillStyle='#ff4400';
+  ctx.beginPath();ctx.arc(this.x,this.y,this.r*.5,0,Math.PI*2);ctx.fill();ng();ctx.restore();
+  this.pts.forEach(p=>{
+    if(p.life<=0)return;
+    ctx.save();ctx.globalAlpha=p.life;gw(p.col,6);ctx.fillStyle=p.col;
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();ng();ctx.restore();
+  });
+};
+
+function Pulse(x,y,col){this.x=x;this.y=y;this.col=col;this.r=0;this.life=1;}
+Pulse.prototype.update=function(){this.life-=.025;this.r+=4;};
+Pulse.prototype.draw=function(){
+  if(this.life<=0)return;
+  ctx.save();ctx.globalAlpha=this.life*.55;gw(this.col,6);ctx.strokeStyle=this.col;
+  ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.stroke();ng();ctx.restore();
+};
+
+function bubble(x,y,txt,col,sub){
+  ctx.save();
+  ctx.fillStyle=col===G?'rgba(0,255,136,.14)':'rgba(255,51,51,.14)';
+  ctx.strokeStyle=col;ctx.lineWidth=2;gw(col,14);
+  ctx.beginPath();ctx.roundRect(x-64,y-22,128,34,7);ctx.fill();ctx.stroke();ng();
+  ctx.fillStyle=col;ctx.font='bold 12px "Orbitron"';ctx.textAlign='center';ctx.fillText(txt,x,y);
+  if(sub){ctx.font='8px "Share Tech Mono"';ctx.fillText(sub,x,y+14);}
+  ctx.restore();
+}
+
+// ─── STATE ─────────────────────────────────────────────────────
+let S,particles,explosions,stepTimer,currentStep,animId,floatT;
+let reconAngle=0,endLanded=false,endFired=false;
+
+// Plane waypoints:
+// 1. PLANE_HOME -> cross right toward enemy territory (y dips below FRONT_Y)
+// 2. Recon circle in enemy territory
+// 3. Return: come back LEFT at PLANE_RETURN_Y (clearly above enemy drone altitude)
+// Enemy drone:
+// Spawns in enemy territory at ENE_START_Y
+// After chase begins, stays at ENE_RETURN_Y (below PLANE_RETURN_Y)
+// So their paths are clearly separated vertically
+
+const STEPS=[
+  {dur:120,lbl:'СЦЕНА 1: КОНТРОЛЕР Т АКТИВУЄ CRYPTOTAG',fn:()=>{
+    S.phase='ctrl_show';
+    setStatus('Контролер Т тримає CryptoTag — пристрій активовано',Y);
+    log('> CryptoTag пристрій активовано','ly');
+    log('> Генерація крипто-ключа...','ly');
+    log('> ID: UA-7731  Підпис: OK ✓','lg');
+  }},
+  {dur:150,lbl:'СЦЕНА 2: КОНТРОЛЕР Т ПЕРЕДАЄ CRYPTOTAG ОПЕРАТОРУ',fn:()=>{
+    S.phase='ctrl_to_op';
+    setStatus('Контролер Т передає CryptoTag оператору',Y);
+    log('> Передача CT-модуля оператору','ly');
+  }},
+  {dur:150,lbl:'СЦЕНА 3: ОПЕРАТОР ВСТАНОВЛЮЄ CRYPTOTAG НА БПЛА',fn:()=>{
+    S.phase='handoff';
+    S.ctrlHasTag=false;S.soldierHasTag=true;
+    setStatus('Оператор встановлює CryptoTag на БПЛА',Y);
+    log('> Монтаж CT-модуля на БПЛА','ly');
+    log('> Прив\'язка підпису до БПЛА UA-7731','lg');
+  }},
+  {dur:190,lbl:'СЦЕНА 4: БПЛА ЛЕТИТЬ НА РОЗВІДКУ',fn:()=>{
+    S.soldierHasTag=false;S.droneHasTag=true;S.phase='flyout';
+    setStatus('БПЛА з CryptoTag прямує за лінію фронту',G);
+    log('> CryptoTag встановлено. Злітаю!','lg');
+    log('> Перетинаю лінію фронту...','ly');
+  }},
+  {dur:160,lbl:'СЦЕНА 5: РОЗВІДКА НА ВОРОЖІЙ СТОРОНІ',fn:()=>{
+    S.phase='recon';
+    setStatus('Виконую розвідку у ворожому тилу...',Y);
+    log('> Веду розвідку','ly');
+    log('> Виявлено об\'єкти ворога','ly');
+  }},
+  {dur:230,lbl:'СЦЕНА 6: ВОРОЖИЙ БПЛА ПЕРЕСЛІДУЄ НА НАШУ СТОРОНУ!',fn:()=>{
+    S.phase='return';S.enemyActive=true;
+    setStatus('Ворожий БПЛА перетинає фронт — переслідує!',R);
+    log('> ТРИВОГА: ворожий БПЛА!','lr');
+    log('> Перетинає лінію фронту!','lr');
+    log('> Переслідує наш БПЛА на нашій стороні','lr');
+    log('> Повертаюсь на базу','lg');
+  }},
+  // Scene 5: both cross front line → IFF fires immediately
+  {dur:280,lbl:'СЦЕНА 7: ВОРОГ НА НАШІЙ СТОРОНІ → IFF ЗАПИТ!',fn:()=>{
+    S.phase='iff';
+    setStatus('Ворог на нашій стороні! Запитувач IFF активний',B);
+    log('──────────────────','ly');
+    log('> Обидва БПЛА на нашій стороні!','lb');
+    log('> IFF → БПЛА [UA-7731]: ХТО ТИ?','lb');
+    // Query to OUR plane (flying high at ~PLANE_RETURN_Y)
+    S.sigQF=new Sig(REB_X,REB_Y, S.planeX,S.planeY, B,'ХТО ТИ?',()=>{
+      setTimeout(()=>{
+        log('> [UA-7731]: КРИПТО-ВІДПОВІДЬ ✓','lg');
+        S.sigRF=new Sig(S.planeX,S.planeY, REB_X,REB_Y, G,'СВІЙ ✓',()=>{
+          S.friendlyOk=true;
+          log('> АВТЕНТИФІКАЦІЯ: УСПІХ ✓','lg');
+          log('> Летить додому','lg');
+          [0,1,2].forEach(i=>setTimeout(()=>particles.push(new Pulse(S.planeX,S.planeY,G)),i*120));
+        });
+      },300);
+    });
+    // Query to ENEMY drone (flying low at ~ENE_RETURN_Y) — separate signal, different angle
+    setTimeout(()=>{
+      log('> IFF → БПЛА [???]: ХТО ТИ?','lb');
+      S.sigQE=new Sig(REB_X,REB_Y, S.enemyX,S.enemyY, B,'ХТО ТИ?',()=>{
+        setTimeout(()=>{
+          log('> [???]: ТИША / підроблений сигнал','lr');
+          S.sigRE=new Sig(S.enemyX,S.enemyY, REB_X,REB_Y, R,'ЧУЖИЙ ✗',()=>{
+            S.enemyExposed=true;
+            log('> АВТЕНТИФІКАЦІЯ: ПРОВАЛ!','lr');
+            log('> Надсилаю команду зенітці...','lr');
+            setStatus('ЧУЖИЙ! Запитувач → Зенітка: ВОГОНЬ!',R);
+            // Fire command beam: REB → Zenith
+            setTimeout(()=>{
+              S.sigFireCmd=new FireSig(REB_X,REB_Y,ZEN_X,ZEN_Y,()=>{
+                log('> ЗЕНІТКА: наказ отримано!','lr');
+                log('> Наводжу приціл на ціль...','lr');
+                setStatus('Зенітка виконує наказ!',R);
+                S.zenithAiming=true;
+              });
+            },200);
+          });
+        },350);
+      });
+    },500);
+  }},
+  {dur:320,lbl:'СЦЕНА 8: СВІЙ ДОДОМУ — ЧУЖОГО ЗНИЩЕНО',fn:()=>{
+    S.phase='endgame';
+  }},
+];
+
+function dist(ax,ay,bx,by){return Math.sqrt((bx-ax)**2+(by-ay)**2);}
+
+function movePlaneTo(tx,ty,spd){
+  const dx=tx-S.planeX,dy=ty-S.planeY,d=Math.sqrt(dx*dx+dy*dy);
+  if(d<spd){S.planeX=tx;S.planeY=ty;return true;}
+  S.planeX+=dx/d*spd;S.planeY+=dy/d*spd;return false;
+}
+
+// Enemy crosses to our side and chases plane, but stays BELOW plane altitude
+function chaseEnemy(){
+  if(S.enemyDead)return;
+  // Chase plane X, but maintain lower altitude (ENE_OUR_SIDE_Y) so paths don't cross
+  const targetX=S.planeX+60;
+  const targetY=ENE_OUR_SIDE_Y;
+  const dx=targetX-S.enemyX,dy=targetY-S.enemyY;
+  const d=Math.sqrt(dx*dx+dy*dy);
+  const spd=1.7;
+  if(d>4){S.enemyX+=dx/d*spd;S.enemyY+=dy/d*spd;}
+}
+
+function init(){
+  cancelAnimationFrame(animId);
+  particles=[];explosions=[];currentStep=-1;stepTimer=0;floatT=0;
+  reconAngle=0;endLanded=false;endFired=false;
+  S={
+    phase:'handoff',soldierHasTag:false,ctrlHasTag:true,droneHasTag:false,transferAnim:0,ctrlTransferAnim:0,
+    planeX:PLANE_HOME_X,planeY:PLANE_HOME_Y,planeDir:1,
+    enemyActive:false,enemyX:ENE_START_X,enemyY:ENE_START_Y,
+    enemyDead:false,
+    sigQF:null,sigRF:null,sigQE:null,sigRE:null,sigFireCmd:null,
+    friendlyOk:false,enemyExposed:false,
+    zenithAngle:-Math.PI*.7,zenithTargetAngle:-Math.PI*.7,
+    zenithAiming:false,shell:null,muzzleFlash:0,
+    showFinalOk:false,done:false,
+  };
+  document.getElementById('btn').style.display='none';
+  document.getElementById('le').innerHTML='';
+  log('> СИСТЕМА CRYPTOTAG v2.0','ly');
+  log('> POST-QUANTUM IFF ACTIVE','ly');
+  log('──────────────────','ly');
+  nextStep();loop();
+}
+function nextStep(){
+  currentStep++;if(currentStep>=STEPS.length)return;
+  const s=STEPS[currentStep];setLabel(s.lbl);stepTimer=s.dur;s.fn();
+}
+
+function loop(){
+  ctx.clearRect(0,0,W,H);
+  // scanline
+  ctx.fillStyle='rgba(0,255,136,.02)';ctx.fillRect(0,(Date.now()/18)%H,W,2);
+  drawFrontLine();
+  floatT+=.04;
+  const ft=Math.sin(floatT)*3;
+
+  // ── Phase movement ──
+  // Phase: controller just holds the device (show)
+  if(S.phase==='ctrl_show'){
+    // nothing to animate, just display
+  }
+  // Phase: controller passes CT down to operator
+  if(S.phase==='ctrl_to_op'){
+    S.ctrlTransferAnim=Math.min(1,S.ctrlTransferAnim+.009);
+    if(S.ctrlTransferAnim>=.99){S.ctrlHasTag=false;S.soldierHasTag=true;}
+  }
+  // Phase: operator installs CT on drone
+  if(S.phase==='handoff'){
+    S.transferAnim=Math.min(1,S.transferAnim+.008);
+    if(S.transferAnim>=.99)S.droneHasTag=true;
+  }
+  if(S.phase==='flyout'){
+    // fly right and slightly downward to cross front line into enemy territory
+    const done=movePlaneTo(PLANE_CROSS_X,PLANE_CROSS_Y,2.3);
+    S.planeDir=1;
+  }
+  if(S.phase==='recon'){
+    reconAngle+=.022;
+    S.planeX=PLANE_CROSS_X-40+Math.cos(reconAngle)*55;
+    S.planeY=PLANE_CROSS_Y+Math.sin(reconAngle)*28;
+    S.planeDir=Math.cos(reconAngle)>=0?1:-1;
+  }
+  if(S.phase==='return'){
+    // plane climbs back to PLANE_RETURN_Y as it heads home
+    if(S.planeY>PLANE_RETURN_Y){
+      S.planeY=Math.max(PLANE_RETURN_Y,S.planeY-2.0);
+    }
+    movePlaneTo(360,PLANE_RETURN_Y,2.0);S.planeDir=-1;
+    // enemy follows — it crosses front line onto our side chasing the plane
+    if(S.enemyActive)chaseEnemy();
+  }
+  if(S.phase==='iff'){
+    // plane continues home at its altitude
+    movePlaneTo(200,PLANE_RETURN_Y,1.1);S.planeDir=-1;
+    if(!S.enemyDead)chaseEnemy();
+    // update signal endpoints to current positions
+    if(S.sigQF){S.sigQF.x2=S.planeX;S.sigQF.y2=S.planeY;}
+    if(S.sigRF){S.sigRF.x1=S.planeX;S.sigRF.y1=S.planeY;}
+    if(S.sigQE){S.sigQE.x2=S.enemyX;S.sigQE.y2=S.enemyY;}
+    if(S.sigRE){S.sigRE.x1=S.enemyX;S.sigRE.y1=S.enemyY;}
+  }
+  if(S.phase==='endgame'){
+    // plane lands home
+    if(!endLanded){
+      const done=movePlaneTo(PLANE_HOME_X,PLANE_HOME_Y,.85);S.planeDir=-1;
+      if(done){
+        endLanded=true;S.showFinalOk=true;
+        setStatus('✓ СВІЙ ПОВЕРНУВСЯ ДОДОМУ',G);
+        log('> Посадка виконана!','lg');
+        log('> Місія завершена успішно','lg');
+      }
+    }
+    // zenith aims
+    if(S.zenithAiming&&!endFired){
+      const dx=S.enemyX-ZEN_X,dy=S.enemyY-(ZEN_Y+4);
+      S.zenithTargetAngle=Math.atan2(dy,dx);
+      const diff=S.zenithTargetAngle-S.zenithAngle;
+      S.zenithAngle+=diff*.065;
+      if(Math.abs(diff)<.06&&!S.shell){
+        endFired=true;S.muzzleFlash=14;
+        log('> ЗЕНІТКА — ВОГОНЬ!','lr');
+        setStatus('БАХ! ЗЕНІТКА ВІДКРИЛА ВОГОНЬ!',R);
+        const bx=ZEN_X+Math.cos(S.zenithAngle)*38;
+        const by=(ZEN_Y+4)+Math.sin(S.zenithAngle)*38;
+        S.shell=new Shell(bx,by,S.enemyX,S.enemyY,()=>{
+          explosions.push(new Boom(S.enemyX,S.enemyY));
+          explosions.push(new Boom(S.enemyX+12,S.enemyY-12));
+          S.enemyDead=true;S.done=true;
+          log('> ✓ ЦІЛЬ ЗНИЩЕНО','lr');
+          setTimeout(()=>setStatus('ЗАГРОЗА НЕЙТРАЛІЗОВАНА ✓',R),400);
+          document.getElementById('btn').style.display='inline-block';
+        });
+      }
+    }
+    if(!S.enemyDead&&S.enemyActive)chaseEnemy();
+    if(S.muzzleFlash>0)S.muzzleFlash--;
+    if(S.shell)S.shell.update();
+    if(S.sigQF){S.sigQF.x2=S.planeX;S.sigQF.y2=S.planeY;}
+    if(S.sigRF){S.sigRF.x1=S.planeX;S.sigRF.y1=S.planeY;}
+  }
+
+  // update all
+  [S.sigQF,S.sigRF,S.sigQE,S.sigRE,S.sigFireCmd].forEach(s=>{if(s)s.update();});
+  particles=particles.filter(p=>p.life>0);particles.forEach(p=>p.update());
+  explosions=explosions.filter(e=>e.life>0);explosions.forEach(e=>e.update());
+
+  // ── DRAW (order matters) ──
+
+  // 1. Controller Т (top) + Operator (below)
+  drawSoldier(CTRL_X, CTRL_Y, S.ctrlHasTag, 'КОНТРОЛЕР Т');
+  drawSoldier(SOL_X,  SOL_Y,  S.soldierHasTag, 'ОПЕРАТОР');
+
+  // Connecting line between controller and operator
+  ctx.save();
+  ctx.strokeStyle='rgba(255,204,0,.25)';ctx.lineWidth=1;ctx.setLineDash([3,5]);
+  ctx.beginPath();ctx.moveTo(CTRL_X,CTRL_Y+26);ctx.lineTo(SOL_X,SOL_Y-40);ctx.stroke();
+  ctx.setLineDash([]);ctx.restore();
+
+  // 2a. Arc: Controller → Operator (CT handoff down)
+  if(S.phase==='ctrl_to_op'&&S.ctrlTransferAnim>0){
+    const t=S.ctrlTransferAnim;
+    const tx=CTRL_X+(SOL_X-CTRL_X)*t;
+    const ty=(CTRL_Y-18)+(SOL_Y-18-(CTRL_Y-18))*t - Math.sin(t*Math.PI)*40;
+    ctx.save();
+    gw(G,10);ctx.strokeStyle=G;ctx.lineWidth=1.5;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(CTRL_X+13,CTRL_Y-17);
+    ctx.quadraticCurveTo(CTRL_X+50,CTRL_Y+30,tx,ty);
+    ctx.stroke();ctx.setLineDash([]);ng();
+    gw(G,12);ctx.fillStyle=G;ctx.fillRect(tx-7,ty-5,14,10);ng();
+    ctx.strokeStyle=G;ctx.lineWidth=1;ctx.strokeRect(tx-7,ty-5,14,10);
+    ctx.fillStyle='#000';ctx.font='6px "Share Tech Mono"';ctx.textAlign='center';ctx.fillText('CT',tx,ty+3);
+    ctx.restore();
+  }
+
+  // 2b. Arc: Operator → Drone (CT install)
+  if(S.phase==='handoff'&&S.transferAnim>0){
+    const t=S.transferAnim;
+    const tx=SOL_X+(S.planeX-SOL_X)*t;
+    const ty=(SOL_Y-18)+(S.planeY-(SOL_Y-18))*t-Math.sin(t*Math.PI)*55;
+    ctx.save();
+    gw(G,10);ctx.strokeStyle=G;ctx.lineWidth=1.5;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(SOL_X+13,SOL_Y-17);
+    ctx.quadraticCurveTo((SOL_X+S.planeX)/2,SOL_Y-80,tx,ty);
+    ctx.stroke();ctx.setLineDash([]);ng();
+    gw(G,12);ctx.fillStyle=G;ctx.fillRect(tx-7,ty-5,14,10);ng();
+    ctx.strokeStyle=G;ctx.lineWidth=1;ctx.strokeRect(tx-7,ty-5,14,10);
+    ctx.fillStyle='#000';ctx.font='6px "Share Tech Mono"';ctx.textAlign='center';ctx.fillText('CT',tx,ty+3);
+    ctx.restore();
+  }
+
+  // 3. REB + Zenith (our side, both blue)
+  drawREB(REB_X,REB_Y);
+  drawZenith(ZEN_X,ZEN_Y,S.zenithAngle);
+
+  // 4. Muzzle flash
+  if(S.muzzleFlash>0){
+    const bx=ZEN_X+Math.cos(S.zenithAngle)*38;
+    const by=(ZEN_Y+4)+Math.sin(S.zenithAngle)*38;
+    ctx.save();ctx.globalAlpha=S.muzzleFlash/14;
+    gw(Y,40);ctx.fillStyle=Y;ctx.beginPath();ctx.arc(bx,by,20,0,Math.PI*2);ctx.fill();ng();ctx.restore();
+  }
+
+  // 5. Shell
+  if(S.shell)S.shell.draw();
+
+  // 6. Enemy drone (drawn BEFORE signals so signals appear on top)
+  if(S.enemyActive&&!S.enemyDead){
+    drawEnemyDrone(S.enemyX,S.enemyY+ft);
+    // exclamation marks when exposed
+    if(S.enemyExposed){
+      ['!','!'].forEach((q,i)=>{
+        const a=floatT*1.7+i*Math.PI;
+        ctx.save();ctx.fillStyle=R;ctx.font='bold 15px "Share Tech Mono"';
+        ctx.textAlign='center';ctx.globalAlpha=.5+Math.sin(a)*.4;
+        gw(R,8);ctx.fillText(q,S.enemyX+Math.cos(a)*26,S.enemyY+ft-24);ng();ctx.restore();
+      });
+    }
+  }
+
+  // 7. Friendly plane (drawn AFTER enemy so it appears on top)
+  if(currentStep>=1||S.transferAnim>.3){
+    drawPlane(S.planeX,S.planeY+ft,S.planeDir,S.droneHasTag);
+  }
+
+  // 8. IFF signals (on top of everything)
+  [S.sigQF,S.sigRF,S.sigQE,S.sigRE,S.sigFireCmd].forEach(s=>{if(s)s.draw();});
+
+  // 9. Particles & explosions
+  particles.forEach(p=>p.draw());
+  explosions.forEach(e=>e.draw());
+
+  // 10. Result bubbles
+  if(S.friendlyOk&&!S.showFinalOk){
+    bubble(S.planeX,S.planeY-52,'✓ СВІЙ',G,'летить додому');
+  }
+  if(S.showFinalOk){
+    bubble(S.planeX,S.planeY-52,'✓ МІСІЯ ВИКОНАНА',G,'повернувся додому');
+  }
+  if(S.enemyExposed&&!S.enemyDead){
+    bubble(S.enemyX,S.enemyY-52,'✗ ЧУЖИЙ',R,'знищити!');
+  }
+
+  // Step timer
+  if(!S.done){
+    stepTimer--;if(stepTimer<=0&&currentStep<STEPS.length-1)nextStep();
+  }
+  animId=requestAnimationFrame(loop);
+}
+window.addEventListener('load',init);
+</script>
+</body>
+</html>
